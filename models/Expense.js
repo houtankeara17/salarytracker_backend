@@ -53,8 +53,8 @@ expenseSchema.pre("save", function (next) {
   }
   const emojiMap = {
     food: "🍚",
-    coffee: "☕",
-    water: "💧",
+    drink: "☕",
+    fruit: "💧",
     transport: "🚗",
     clothing: "👕",
     health: "💊",
