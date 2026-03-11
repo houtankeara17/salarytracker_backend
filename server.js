@@ -22,6 +22,7 @@ app.use("/api/goals", require("./routes/goalRoutes"));
 app.use("/api/givings", require("./routes/givingRoutes"));
 app.use("/api/others", require("./routes/otherRoutes"));
 app.use("/api/dashboard", require("./routes/dashboardRoutes"));
+app.use("/api/notes", require("./routes/noteRoutes"));
 
 app.get("/api/health", (req, res) =>
   res.json({
