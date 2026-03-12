@@ -2,25 +2,27 @@ const express = require("express");
 const router = express.Router();
 const {
   getNotes,
-  getNoteById,
+  getNote,
   createNote,
   updateNote,
-  deleteNote,
   togglePin,
-  toggleStar,
-  getCategories,
+  deleteNote,
 } = require("../controllers/noteController");
+const { protect } = require("../middleware/auth");
 
-// Replace `protect` with your actual auth middleware import, e.g.:
-// const { protect } = require("../middleware/authMiddleware");
-const { protect } = require("../middleware/authMiddleware");
+router.use(protect); // all routes require login
 
-router.use(protect); // all note routes are protected
+router
+  .route("/")
+  .get(getNotes) // GET  /api/notes
+  .post(createNote); // POST /api/notes
 
-router.route("/").get(getNotes).post(createNote);
-router.get("/categories", getCategories);
-router.route("/:id").get(getNoteById).put(updateNote).delete(deleteNote);
-router.patch("/:id/pin", togglePin);
-router.patch("/:id/star", toggleStar);
+router
+  .route("/:id")
+  .get(getNote) // GET    /api/notes/:id
+  .put(updateNote) // PUT    /api/notes/:id
+  .delete(deleteNote); // DELETE /api/notes/:id
+
+router.patch("/:id/pin", togglePin); // PATCH /api/notes/:id/pin
 
 module.exports = router;
