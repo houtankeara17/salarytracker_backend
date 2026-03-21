@@ -7,22 +7,20 @@ const {
   updateNote,
   togglePin,
   deleteNote,
+  upload,
 } = require("../controllers/noteController");
 const { protect } = require("../middleware/auth");
 
-router.use(protect); // all routes require login
+router.use(protect);
 
-router
-  .route("/")
-  .get(getNotes) // GET  /api/notes
-  .post(createNote); // POST /api/notes
+router.route("/").get(getNotes).post(upload.array("images", 6), createNote); // up to 6 images
 
 router
   .route("/:id")
-  .get(getNote) // GET    /api/notes/:id
-  .put(updateNote) // PUT    /api/notes/:id
-  .delete(deleteNote); // DELETE /api/notes/:id
+  .get(getNote)
+  .put(upload.array("images", 6), updateNote)
+  .delete(deleteNote);
 
-router.patch("/:id/pin", togglePin); // PATCH /api/notes/:id/pin
+router.patch("/:id/pin", togglePin);
 
 module.exports = router;
