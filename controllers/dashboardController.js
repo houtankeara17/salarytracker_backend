@@ -65,6 +65,16 @@ exports.getSummary = async (req, res) => {
             yearly: { totalUSD: 0, totalKHR: 0, count: 0 },
           },
           categoryBreakdown: [],
+          // ── NEW: empty weekly pattern ──
+          weeklyPattern: [
+            { dow: 0, totalUSD: 0, count: 0 },
+            { dow: 1, totalUSD: 0, count: 0 },
+            { dow: 2, totalUSD: 0, count: 0 },
+            { dow: 3, totalUSD: 0, count: 0 },
+            { dow: 4, totalUSD: 0, count: 0 },
+            { dow: 5, totalUSD: 0, count: 0 },
+            { dow: 6, totalUSD: 0, count: 0 },
+          ],
           plans: {
             recentTrips: [],
             recentGoals: [],
@@ -86,9 +96,9 @@ exports.getSummary = async (req, res) => {
     const monthStart = new Date(year, monthNum - 1, 1);
     const monthEnd = new Date(year, monthNum, 1); // first day of next month
 
-    // For daily/weekly we only use these when viewing current month
     const isCurrentMonth =
       year === now.getFullYear() && monthNum === now.getMonth() + 1;
+
     const todayStart = new Date(
       now.getFullYear(),
       now.getMonth(),
@@ -96,20 +106,31 @@ exports.getSummary = async (req, res) => {
     );
     const todayEnd = new Date(todayStart);
     todayEnd.setDate(todayEnd.getDate() + 1);
+
     const weekStart = new Date(todayStart);
     weekStart.setDate(weekStart.getDate() - 6);
+
     const yearStart = new Date(year, 0, 1);
     const yearEnd = new Date(year + 1, 0, 1);
 
-    // Daily & weekly only make sense for current month
     const dailyRange = isCurrentMonth
       ? { $gte: todayStart, $lt: todayEnd }
       : { $gte: monthStart, $lt: new Date(monthStart.getTime() + 86400000) };
+
     const weeklyRange = isCurrentMonth
       ? { $gte: weekStart, $lt: todayEnd }
       : { $gte: monthStart, $lt: monthEnd };
 
-    const [daily, weekly, monthly, yearly] = await Promise.all([
+    // ── Run all aggregations in parallel ──────────────────────
+    const [
+      daily,
+      weekly,
+      monthly,
+      yearly,
+      categoryBreakdown,
+      weeklyPatternRaw, // ← NEW
+    ] = await Promise.all([
+      // Daily total
       Expense.aggregate([
         { $match: { userId: uid, date: dailyRange } },
         {
@@ -121,6 +142,8 @@ exports.getSummary = async (req, res) => {
           },
         },
       ]),
+
+      // Weekly total (last 7 days or whole month if historical)
       Expense.aggregate([
         { $match: { userId: uid, date: weeklyRange } },
         {
@@ -132,6 +155,8 @@ exports.getSummary = async (req, res) => {
           },
         },
       ]),
+
+      // Monthly total
       Expense.aggregate([
         { $match: { userId: uid, date: { $gte: monthStart, $lt: monthEnd } } },
         {
@@ -143,6 +168,8 @@ exports.getSummary = async (req, res) => {
           },
         },
       ]),
+
+      // Yearly total
       Expense.aggregate([
         { $match: { userId: uid, date: { $gte: yearStart, $lt: yearEnd } } },
         {
@@ -154,20 +181,51 @@ exports.getSummary = async (req, res) => {
           },
         },
       ]),
+
+      // Category breakdown for selected month
+      Expense.aggregate([
+        { $match: { userId: uid, date: { $gte: monthStart, $lt: monthEnd } } },
+        {
+          $group: {
+            _id: "$category",
+            totalUSD: { $sum: "$amountUSD" },
+            count: { $sum: 1 },
+            emoji: { $first: "$categoryEmoji" },
+          },
+        },
+        { $sort: { totalUSD: -1 } },
+      ]),
+
+      // ── NEW: Weekly pattern — group by day-of-week (0=Sun … 6=Sat) ──
+      // $dayOfWeek returns 1=Sun … 7=Sat in MongoDB, so we subtract 1
+      Expense.aggregate([
+        { $match: { userId: uid, date: { $gte: monthStart, $lt: monthEnd } } },
+        {
+          $group: {
+            _id: { $subtract: [{ $dayOfWeek: "$date" }, 1] }, // 0=Sun, 6=Sat
+            totalUSD: { $sum: "$amountUSD" },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
     ]);
 
-    const categoryBreakdown = await Expense.aggregate([
-      { $match: { userId: uid, date: { $gte: monthStart, $lt: monthEnd } } },
-      {
-        $group: {
-          _id: "$category",
-          totalUSD: { $sum: "$amountUSD" },
-          count: { $sum: 1 },
-          emoji: { $first: "$categoryEmoji" },
-        },
-      },
-      { $sort: { totalUSD: -1 } },
-    ]);
+    // ── Normalise weeklyPattern to always have all 7 days ─────
+    // Fill in any missing days with 0 so the frontend always gets
+    // a clean array of 7 objects indexed 0–6
+    const weeklyPatternMap = {};
+    weeklyPatternRaw.forEach((row) => {
+      weeklyPatternMap[row._id] = {
+        dow: row._id,
+        totalUSD: row.totalUSD,
+        count: row.count,
+      };
+    });
+    const weeklyPattern = Array.from(
+      { length: 7 },
+      (_, i) => weeklyPatternMap[i] || { dow: i, totalUSD: 0, count: 0 },
+    );
 
     // ── Plans ──────────────────────────────────────────────────
     const [trips, goals, givings, others] = await Promise.all([
@@ -177,33 +235,29 @@ exports.getSummary = async (req, res) => {
       Other.find({ userId: uid }).sort({ createdAt: -1 }).limit(5),
     ]);
 
-    // Completed this specific requested month
+    // Completed items in the requested month
     const completedThisMonth = [
       ...trips.filter(
         (t) =>
           t.status === "completed" &&
-          t.completedAt &&
           t.completedAt >= monthStart &&
           t.completedAt < monthEnd,
       ),
       ...goals.filter(
         (g) =>
           g.status === "completed" &&
-          g.completedAt &&
           g.completedAt >= monthStart &&
           g.completedAt < monthEnd,
       ),
       ...givings.filter(
         (g) =>
           g.status === "completed" &&
-          g.completedAt &&
           g.completedAt >= monthStart &&
           g.completedAt < monthEnd,
       ),
       ...others.filter(
         (o) =>
           o.status === "completed" &&
-          o.completedAt &&
           o.completedAt >= monthStart &&
           o.completedAt < monthEnd,
       ),
@@ -219,22 +273,26 @@ exports.getSummary = async (req, res) => {
     const monthlySpentUSD = monthly[0]?.totalUSD || 0;
     const remainingUSD = spendableUSD - monthlySpentUSD - completedDeductionUSD;
 
+    // Plan counts
     const [tripStats, goalStats, givingStats, otherStats] = await Promise.all([
       Promise.all([
         Trip.countDocuments({ userId: uid }),
         Trip.countDocuments({ userId: uid, status: "completed" }),
         Trip.countDocuments({ userId: uid, status: "ongoing" }),
       ]).then(([total, completed, ongoing]) => ({ total, completed, ongoing })),
+
       Promise.all([
         Goal.countDocuments({ userId: uid }),
         Goal.countDocuments({ userId: uid, status: "completed" }),
         Goal.countDocuments({ userId: uid, status: "ongoing" }),
       ]).then(([total, completed, ongoing]) => ({ total, completed, ongoing })),
+
       Promise.all([
         Giving.countDocuments({ userId: uid }),
         Giving.countDocuments({ userId: uid, status: "completed" }),
         Giving.countDocuments({ userId: uid, status: "ongoing" }),
       ]).then(([total, completed, ongoing]) => ({ total, completed, ongoing })),
+
       Promise.all([
         Other.countDocuments({ userId: uid }),
         Other.countDocuments({ userId: uid, status: "completed" }),
@@ -260,6 +318,10 @@ exports.getSummary = async (req, res) => {
           yearly: yearly[0] || { totalUSD: 0, totalKHR: 0, count: 0 },
         },
         categoryBreakdown,
+        // ── NEW: 7-element array, one per day Sun–Sat ──
+        // weeklyPattern[0] = Sunday, weeklyPattern[6] = Saturday
+        // each item: { dow: 0-6, totalUSD: number, count: number }
+        weeklyPattern,
         plans: {
           recentTrips: trips,
           recentGoals: goals,
