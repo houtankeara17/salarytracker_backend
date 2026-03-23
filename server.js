@@ -15,6 +15,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // ── Routes ────────────────────────────────────────────────────
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/salaries", require("./routes/salaryRoutes"));
+app.use("/api/bonuses", require("./routes/bonusRoutes"));
 app.use("/api/savings", require("./routes/savingRoutes"));
 app.use("/api/expenses", require("./routes/expenseRoutes"));
 app.use("/api/trips", require("./routes/tripRoutes"));
