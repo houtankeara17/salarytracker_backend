@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const ctrl = require("../controllers/bonusController");
+const ctrl = require("../controllers/BonusController");
 const { protect } = require("../middleware/auth");
 
 router.get("/", protect, ctrl.getAllBonuses);
